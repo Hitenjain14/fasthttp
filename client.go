@@ -324,6 +324,15 @@ func (c *Client) Get(dst []byte, url string) (statusCode int, body []byte, err e
 	return clientGetURL(dst, url, c)
 }
 
+func (c *Client) GetWithRequest(req *Request, dst []byte) (statusCode int, body []byte, err error) {
+	return doRequestFollowRedirectsBuffer(req, dst, req.URI().String(), c)
+}
+
+func (c *Client) GetWithRequestTimeout(req *Request, dst []byte, timeout time.Duration) (statusCode int, body []byte, err error) {
+	deadline := time.Now().Add(timeout)
+	return clientWithRequestGetURLDeadline(req, dst, deadline, c)
+}
+
 // GetTimeout returns the status code and body of url.
 //
 // The contents of dst will be replaced by the body and returned, if the dst
@@ -990,6 +999,71 @@ func clientGetURLDeadline(dst []byte, url string, deadline time.Time, c clientDo
 		mu.Unlock()
 
 		ReleaseRequest(req)
+	}()
+
+	tc := AcquireTimer(timeout)
+	select {
+	case resp := <-ch:
+		statusCode = resp.statusCode
+		body = resp.body
+		err = resp.err
+	case <-tc.C:
+		mu.Lock()
+		if responded {
+			resp := <-ch
+			statusCode = resp.statusCode
+			body = resp.body
+			err = resp.err
+		} else {
+			timedout = true
+			err = ErrTimeout
+			body = dst
+		}
+		mu.Unlock()
+	}
+	ReleaseTimer(tc)
+
+	clientURLResponseChPool.Put(chv)
+
+	return statusCode, body, err
+}
+
+func clientWithRequestGetURLDeadline(req *Request, dst []byte, deadline time.Time, c clientDoer) (statusCode int, body []byte, err error) {
+	timeout := time.Until(deadline)
+	if timeout <= 0 {
+		return 0, dst, ErrTimeout
+	}
+
+	var ch chan clientURLResponse
+	chv := clientURLResponseChPool.Get()
+	if chv == nil {
+		chv = make(chan clientURLResponse, 1)
+	}
+	ch = chv.(chan clientURLResponse)
+
+	// Note that the request continues execution on ErrTimeout until
+	// client-specific ReadTimeout exceeds. This helps limiting load
+	// on slow hosts by MaxConns* concurrent requests.
+	//
+	// Without this 'hack' the load on slow host could exceed MaxConns*
+	// concurrent requests, since timed out requests on client side
+	// usually continue execution on the host.
+
+	var mu sync.Mutex
+	var timedout, responded bool
+
+	go func() {
+		statusCodeCopy, bodyCopy, errCopy := doRequestFollowRedirectsBuffer(req, dst, req.URI().String(), c)
+		mu.Lock()
+		if !timedout {
+			ch <- clientURLResponse{
+				statusCode: statusCodeCopy,
+				body:       bodyCopy,
+				err:        errCopy,
+			}
+			responded = true
+		}
+		mu.Unlock()
 	}()
 
 	tc := AcquireTimer(timeout)
