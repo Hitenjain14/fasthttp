@@ -119,7 +119,7 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 
 	fetchPromise := js.Global().Call("fetch", req.URI().String(), opt)
 	var (
-		respCh           = make(chan struct{}, 1)
+		respCh           = make(chan respWriter, 1)
 		errCh            = make(chan error, 1)
 		success, failure js.Func
 	)
@@ -144,30 +144,32 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 
 		// The body is undefined when the browser does not support streaming response bodies (Firefox),
 		// and null in certain error cases, i.e. when the request is blocked because of CORS settings.
+		var reader respWriter
 		if !b.IsUndefined() && !b.IsNull() {
-			reader := &streamReader{stream: b.Call("getReader")}
-			for {
-				_, err := reader.Read(resp.body.B)
-				if err != nil {
-					if err == io.EOF {
-						resp.body.B = resp.body.B[:reader.writtenData]
-						resp.Header.SetContentLength(reader.writtenData)
-						break
-					}
-					errCh <- err
-					return nil
-				}
-			}
+			reader = &streamReader{stream: b.Call("getReader")}
+			// for {
+			// 	_, err := reader.WriteToRespBody(resp)
+			// 	if err != nil {
+			// 		if err == io.EOF {
+			// 			resp.body.B = resp.body.B[:reader.writtenData]
+			// 			resp.Header.SetContentLength(reader.writtenData)
+			// 			break
+			// 		}
+			// 		errCh <- err
+			// 		reader.Close()
+			// 		return nil
+			// 	}
+			// }
 		} else {
 			// Fall back to using ArrayBuffer
 			// https://developer.mozilla.org/en-US/docs/Web/API/Body/arrayBuffer
-			reader := &arrayReader{arrayPromise: result.Call("arrayBuffer")}
-			n, err := reader.WriteToRespBody(resp)
-			if err != nil {
-				errCh <- err
-				return nil
-			}
-			resp.Header.SetContentLength(n)
+			reader = &arrayReader{arrayPromise: result.Call("arrayBuffer")}
+			// n, err := reader.WriteToRespBody(resp)
+			// if err != nil {
+			// 	errCh <- err
+			// 	return nil
+			// }
+			// resp.Header.SetContentLength(n)
 		}
 
 		code := result.Get("status").Int()
@@ -180,7 +182,7 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 		// 	Body:          body,
 		// 	Request:       req,
 		// }
-		respCh <- struct{}{}
+		respCh <- reader
 
 		return nil
 	})
@@ -215,7 +217,17 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 			ac.Call("abort")
 		}
 		return false, ErrTimeout
-	case <-respCh:
+	case reader := <-respCh:
+		for {
+			_, err := reader.WriteToRespBody(resp)
+			if err != nil {
+				reader.Close()
+				if err == io.EOF {
+					break
+				}
+				return false, err
+			}
+		}
 		return false, nil
 	case err := <-errCh:
 		return false, err
@@ -317,6 +329,8 @@ func (r *streamReader) WriteToRespBody(resp *Response) (n int, err error) {
 		return n, nil
 	case err := <-errCh:
 		r.err = err
+		resp.body.B = resp.body.B[:r.writtenData]
+		resp.Header.SetContentLength(r.writtenData)
 		return 0, err
 	}
 
@@ -387,6 +401,10 @@ func (r *arrayReader) Read(p []byte) (n int, err error) {
 }
 
 func (r *arrayReader) WriteToRespBody(resp *Response) (n int, err error) {
+	if r.read {
+		return 0, io.EOF
+	}
+	r.read = true
 	var (
 		bCh   = make(chan int, 1)
 		errCh = make(chan error, 1)
@@ -419,6 +437,7 @@ func (r *arrayReader) WriteToRespBody(resp *Response) (n int, err error) {
 	r.arrayPromise.Call("then", success, failure)
 	select {
 	case n = <-bCh:
+		resp.Header.SetContentLength(n)
 		return n, nil
 	case err := <-errCh:
 		return 0, err
@@ -430,4 +449,9 @@ func (r *arrayReader) Close() error {
 		r.err = errClosed
 	}
 	return nil
+}
+
+type respWriter interface {
+	WriteToRespBody(resp *Response) (n int, err error)
+	Close() error
 }
