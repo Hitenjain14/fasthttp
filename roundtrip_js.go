@@ -94,8 +94,9 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 	}
 	headers := js.Global().Get("Headers").New()
 	for _, key := range req.Header.PeekKeys() {
-		value := string(req.Header.Peek(string(key)))
-		headers.Call("append", key, value)
+		stringKey := string(key)
+		value := string(req.Header.Peek(string(stringKey)))
+		headers.Call("append", stringKey, value)
 	}
 	opt.Set("headers", headers)
 
