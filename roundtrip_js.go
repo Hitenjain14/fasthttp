@@ -145,13 +145,29 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 		// The body is undefined when the browser does not support streaming response bodies (Firefox),
 		// and null in certain error cases, i.e. when the request is blocked because of CORS settings.
 		if !b.IsUndefined() && !b.IsNull() {
-			errCh <- fmt.Errorf("net/http: fetch() failed: body is undefined or null stream support is missing")
-			return nil
+			reader := &streamReader{stream: b.Call("getReader")}
+			for {
+				_, err := reader.Read(resp.body.B)
+				if err != nil {
+					if err == io.EOF {
+						resp.body.B = resp.body.B[:reader.writtenData]
+						resp.Header.SetContentLength(reader.writtenData)
+						break
+					}
+					errCh <- err
+					return nil
+				}
+			}
 		} else {
 			// Fall back to using ArrayBuffer
 			// https://developer.mozilla.org/en-US/docs/Web/API/Body/arrayBuffer
 			reader := &arrayReader{arrayPromise: result.Call("arrayBuffer")}
-			reader.WriteToRespBody(resp)
+			n, err := reader.WriteToRespBody(resp)
+			if err != nil {
+				errCh <- err
+				return nil
+			}
+			resp.Header.SetContentLength(n)
 		}
 
 		code := result.Get("status").Int()
@@ -211,9 +227,10 @@ var errClosed = errors.New("net/http: reader is closed")
 // streamReader implements an io.ReadCloser wrapper for ReadableStream.
 // See https://fetch.spec.whatwg.org/#readablestream for more information.
 type streamReader struct {
-	pending []byte
-	stream  js.Value
-	err     error // sticky read error
+	pending     []byte
+	stream      js.Value
+	writtenData int
+	err         error // sticky read error
 }
 
 func (r *streamReader) Read(p []byte) (n int, err error) {
@@ -259,6 +276,50 @@ func (r *streamReader) Read(p []byte) (n int, err error) {
 	n = copy(p, r.pending)
 	r.pending = r.pending[n:]
 	return n, nil
+}
+
+func (r *streamReader) WriteToRespBody(resp *Response) (n int, err error) {
+	var (
+		bCh   = make(chan int, 1)
+		errCh = make(chan error, 1)
+	)
+	success := js.FuncOf(func(this js.Value, args []js.Value) any {
+		result := args[0]
+		if result.Get("done").Bool() {
+			errCh <- io.EOF
+			return nil
+		}
+		respBodyLen := result.Get("value").Get("byteLength").Int()
+		if respBodyLen+r.writtenData > len(resp.body.B) {
+			newBuf := make([]byte, (2*respBodyLen)+r.writtenData)
+			copy(newBuf, resp.body.B)
+			resp.body.B = newBuf
+		}
+		js.CopyBytesToGo(resp.body.B[r.writtenData:], result.Get("value"))
+		bCh <- respBodyLen
+		return nil
+	})
+	defer success.Release()
+	failure := js.FuncOf(func(this js.Value, args []js.Value) any {
+		// Assumes it's a TypeError. See
+		// https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/TypeError
+		// for more information on this type. See
+		// https://streams.spec.whatwg.org/#byob-reader-read for the spec on
+		// the read method.
+		errCh <- errors.New(args[0].Get("message").String())
+		return nil
+	})
+	defer failure.Release()
+	r.stream.Call("read").Call("then", success, failure)
+	select {
+	case n = <-bCh:
+		r.writtenData += n
+		return n, nil
+	case err := <-errCh:
+		r.err = err
+		return 0, err
+	}
+
 }
 
 func (r *streamReader) Close() error {
