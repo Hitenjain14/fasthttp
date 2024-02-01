@@ -910,6 +910,11 @@ func (c *HostClient) GetTimeout(dst []byte, url string, timeout time.Duration) (
 	return clientGetURLTimeout(dst, url, timeout, c)
 }
 
+func (c *HostClient) GetWithRequestTimeout(req *Request, dst []byte, timeout time.Duration) (statusCode int, body []byte, err error) {
+	deadline := time.Now().Add(timeout)
+	return clientWithRequestGetURLDeadline(req, dst, deadline, c)
+}
+
 // GetDeadline returns the status code and body of url.
 //
 // The contents of dst will be replaced by the body and returned, if the dst
