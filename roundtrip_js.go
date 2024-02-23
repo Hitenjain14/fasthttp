@@ -303,6 +303,9 @@ func (r *streamReader) WriteToRespBody(resp *Response) (n int, err error) {
 			return nil
 		}
 		respBodyLen := result.Get("value").Get("byteLength").Int()
+		if resp.body == nil {
+			resp.body = responseBodyPool.Get()
+		}
 		if respBodyLen+r.writtenData > len(resp.body.B) {
 			newBuf := make([]byte, (2*respBodyLen)+r.writtenData)
 			copy(newBuf, resp.body.B)
