@@ -98,6 +98,7 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 		value := string(req.Header.Peek(string(stringKey)))
 		headers.Call("append", stringKey, value)
 	}
+	headers.Call("append", "Content-Type", string(req.Header.ContentType()))
 	opt.Set("headers", headers)
 
 	if req.Body != nil {
