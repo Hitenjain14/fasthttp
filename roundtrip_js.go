@@ -61,7 +61,8 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 	if jsFetchMissing || jsFetchDisabled {
 		return false, fmt.Errorf("fasthttp: Fetch API is not available")
 	}
-	tc := AcquireTimer(req.timeout)
+
+	tc := AcquireTimer(hc.ReadTimeout)
 	defer ReleaseTimer(tc)
 
 	ac := js.Global().Get("AbortController")
