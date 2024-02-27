@@ -910,6 +910,10 @@ func (c *HostClient) GetTimeout(dst []byte, url string, timeout time.Duration) (
 	return clientGetURLTimeout(dst, url, timeout, c)
 }
 
+func (c *HostClient) GetWithRequest(req *Request, dst []byte) (statusCode int, body []byte, err error) {
+	return doRequestFollowRedirectsBuffer(req, dst, req.URI().String(), c)
+}
+
 func (c *HostClient) GetWithRequestTimeout(req *Request, dst []byte, timeout time.Duration) (statusCode int, body []byte, err error) {
 	deadline := time.Now().Add(timeout)
 	return clientWithRequestGetURLDeadline(req, dst, deadline, c)
@@ -1136,15 +1140,19 @@ const defaultMaxRedirectsCount = 16
 func doRequestFollowRedirectsBuffer(req *Request, dst []byte, url string, c clientDoer) (statusCode int, body []byte, err error) {
 	resp := AcquireResponse()
 	bodyBuf := resp.bodyBuffer()
-	resp.keepBodyBuffer = true
-	oldBody := bodyBuf.B
-	bodyBuf.B = dst
+	var oldBody []byte
+	if dst != nil {
+		resp.keepBodyBuffer = true
+		oldBody = bodyBuf.B
+		bodyBuf.B = dst
+	}
 
 	statusCode, _, err = doRequestFollowRedirects(req, resp, url, defaultMaxRedirectsCount, c)
-
-	body = bodyBuf.B
-	bodyBuf.B = oldBody
-	resp.keepBodyBuffer = false
+	if dst != nil {
+		body = bodyBuf.B
+		bodyBuf.B = oldBody
+		resp.keepBodyBuffer = false
+	}
 	ReleaseResponse(resp)
 
 	return statusCode, body, err
@@ -1348,6 +1356,9 @@ func (c *HostClient) DoRedirects(req *Request, resp *Response, maxRedirectsCount
 func (c *HostClient) Do(req *Request, resp *Response) error {
 	var err error
 	var retry bool
+	if req == nil || resp == nil {
+		return fmt.Errorf("BUG: req and resp must be non-nil")
+	}
 	maxAttempts := c.MaxIdemponentCallAttempts
 	if maxAttempts <= 0 {
 		maxAttempts = DefaultMaxIdemponentCallAttempts
