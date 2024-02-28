@@ -220,6 +220,9 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 		}
 		return false, ErrTimeout
 	case reader := <-respCh:
+		if resp.body == nil {
+			resp.body = responseBodyPool.Get()
+		}
 		for {
 			_, err := reader.WriteToRespBody(resp)
 			if err != nil {
@@ -304,9 +307,6 @@ func (r *streamReader) WriteToRespBody(resp *Response) (n int, err error) {
 			return nil
 		}
 		respBodyLen := result.Get("value").Get("byteLength").Int()
-		if resp.body == nil {
-			resp.body = responseBodyPool.Get()
-		}
 		if respBodyLen+r.writtenData > len(resp.body.B) {
 			newBuf := make([]byte, (2*respBodyLen)+r.writtenData)
 			copy(newBuf, resp.body.B)
@@ -334,8 +334,10 @@ func (r *streamReader) WriteToRespBody(resp *Response) (n int, err error) {
 		return n, nil
 	case err := <-errCh:
 		r.err = err
-		resp.body.B = resp.body.B[:r.writtenData]
-		resp.Header.SetContentLength(r.writtenData)
+		if r.writtenData > 0 {
+			resp.body.B = resp.body.B[:r.writtenData]
+			resp.Header.SetContentLength(r.writtenData)
+		}
 		return 0, err
 	}
 
