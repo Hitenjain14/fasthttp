@@ -1356,9 +1356,6 @@ func (c *HostClient) DoRedirects(req *Request, resp *Response, maxRedirectsCount
 func (c *HostClient) Do(req *Request, resp *Response) error {
 	var err error
 	var retry bool
-	if req == nil || resp == nil {
-		return fmt.Errorf("BUG: req and resp must be non-nil")
-	}
 	maxAttempts := c.MaxIdemponentCallAttempts
 	if maxAttempts <= 0 {
 		maxAttempts = DefaultMaxIdemponentCallAttempts
