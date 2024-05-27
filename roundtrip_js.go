@@ -224,6 +224,7 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 		}
 		return false, ErrTimeout
 	case reader := <-respCh:
+		fmt.Println("response_body_length: ", len(resp.body.B))
 		if resp.body == nil {
 			resp.body = responseBodyPool.Get()
 		}
@@ -311,11 +312,13 @@ func (r *streamReader) WriteToRespBody(resp *Response) (n int, err error) {
 			return nil
 		}
 		respBodyLen := result.Get("value").Get("byteLength").Int()
-		if respBodyLen+r.writtenData > len(resp.body.B) {
+		if respBodyLen+r.writtenData > cap(resp.body.B) {
 			fmt.Println("new_buffer_allocated: ", respBodyLen+r.writtenData, len(resp.body.B))
 			newBuf := make([]byte, (2*respBodyLen)+r.writtenData)
 			copy(newBuf, resp.body.B)
 			resp.body.B = newBuf
+		} else if respBodyLen+r.writtenData > len(resp.body.B) {
+			resp.body.B = resp.body.B[:respBodyLen+r.writtenData]
 		}
 		js.CopyBytesToGo(resp.body.B[r.writtenData:], result.Get("value"))
 		bCh <- respBodyLen
