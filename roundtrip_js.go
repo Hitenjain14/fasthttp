@@ -224,7 +224,6 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 		}
 		return false, ErrTimeout
 	case reader := <-respCh:
-		fmt.Println("response_body_length: ", len(resp.body.B))
 		if resp.body == nil {
 			resp.body = responseBodyPool.Get()
 		}

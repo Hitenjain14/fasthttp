@@ -1141,7 +1141,6 @@ func doRequestFollowRedirectsBuffer(req *Request, dst []byte, url string, c clie
 	resp := AcquireResponse()
 	bodyBuf := resp.bodyBuffer()
 	var oldBody []byte
-	fmt.Println("dest_length: ", len(dst))
 	if dst != nil {
 		resp.keepBodyBuffer = true
 		oldBody = bodyBuf.B
