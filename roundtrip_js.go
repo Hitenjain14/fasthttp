@@ -148,7 +148,6 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 		}
 
 		b := result.Get("body")
-
 		// The body is undefined when the browser does not support streaming response bodies (Firefox),
 		// and null in certain error cases, i.e. when the request is blocked because of CORS settings.
 		var reader respWriter
@@ -313,6 +312,7 @@ func (r *streamReader) WriteToRespBody(resp *Response) (n int, err error) {
 		}
 		respBodyLen := result.Get("value").Get("byteLength").Int()
 		if respBodyLen+r.writtenData > len(resp.body.B) {
+			fmt.Println("new_buffer_allocated: ", respBodyLen+r.writtenData, len(resp.body.B))
 			newBuf := make([]byte, (2*respBodyLen)+r.writtenData)
 			copy(newBuf, resp.body.B)
 			resp.body.B = newBuf
