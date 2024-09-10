@@ -644,6 +644,7 @@ func (resp *Response) ResetBody() {
 		if resp.keepBodyBuffer {
 			resp.body.Reset()
 		} else {
+			fmt.Println("put response body", cap(resp.body.B))
 			responseBodyPool.Put(resp.body)
 			resp.body = nil
 		}
