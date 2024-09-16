@@ -226,7 +226,6 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 	case reader := <-respCh:
 		if resp.body == nil {
 			resp.body = responseBodyPool.Get()
-			fmt.Println("get body from pool", cap(resp.body.B))
 		}
 		for {
 			_, err := reader.WriteToRespBody(resp)
@@ -313,12 +312,10 @@ func (r *streamReader) WriteToRespBody(resp *Response) (n int, err error) {
 		}
 		respBodyLen := result.Get("value").Get("byteLength").Int()
 		if respBodyLen+r.writtenData > cap(resp.body.B) {
-			fmt.Println("new_buffer: ", respBodyLen+r.writtenData, cap(resp.body.B))
 			newBuf := make([]byte, (2*respBodyLen)+r.writtenData)
 			copy(newBuf, resp.body.B)
 			resp.body.B = newBuf
 		} else if respBodyLen+r.writtenData > len(resp.body.B) {
-			fmt.Println("reusing_buffer: ", respBodyLen+r.writtenData, cap(resp.body.B))
 			resp.body.B = resp.body.B[:respBodyLen+r.writtenData]
 		}
 		js.CopyBytesToGo(resp.body.B[r.writtenData:], result.Get("value"))
