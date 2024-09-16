@@ -318,6 +318,7 @@ func (r *streamReader) WriteToRespBody(resp *Response) (n int, err error) {
 			copy(newBuf, resp.body.B)
 			resp.body.B = newBuf
 		} else if respBodyLen+r.writtenData > len(resp.body.B) {
+			fmt.Println("reusing_buffer: ", respBodyLen+r.writtenData, cap(resp.body.B))
 			resp.body.B = resp.body.B[:respBodyLen+r.writtenData]
 		}
 		js.CopyBytesToGo(resp.body.B[r.writtenData:], result.Get("value"))
