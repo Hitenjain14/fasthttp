@@ -8,9 +8,11 @@ import (
 	"io"
 	"strings"
 	"syscall/js"
+
+	"github.com/hack-pad/safejs"
 )
 
-var uint8Array = js.Global().Get("Uint8Array")
+var uint8Array, _ = safejs.Global().Get("Uint8Array")
 
 // jsFetchMode is a Request.Header map key that, if present,
 // signals that the map entry is actually an option to the Fetch API mode setting.
@@ -118,8 +120,12 @@ func (t *transport) RoundTrip(hc *HostClient, req *Request, resp *Response) (ret
 		// See https://go.dev/issue/61889 for discussion.
 		body := req.Body()
 		if len(body) != 0 {
-			buf := uint8Array.New(len(body))
-			js.CopyBytesToJS(buf, body)
+			buf, err := uint8Array.New(len(body))
+			if err != nil {
+
+				return false, err
+			}
+			safejs.CopyBytesToJS(buf, body)
 			opt.Set("body", buf)
 		}
 	}
@@ -381,9 +387,11 @@ func (r *arrayReader) Read(p []byte) (n int, err error) {
 		)
 		success := js.FuncOf(func(this js.Value, args []js.Value) any {
 			// Wrap the input ArrayBuffer with a Uint8Array
-			uint8arrayWrapper := uint8Array.New(args[0])
-			value := make([]byte, uint8arrayWrapper.Get("byteLength").Int())
-			js.CopyBytesToGo(value, uint8arrayWrapper)
+			uint8arrayWrapper, _ := uint8Array.New(args[0])
+			byteLengthObj, _ := uint8arrayWrapper.Get("byteLength")
+			byteLength, _ := byteLengthObj.Int()
+			value := make([]byte, byteLength)
+			safejs.CopyBytesToGo(value, uint8arrayWrapper)
 			bCh <- value
 			return nil
 		})
@@ -424,8 +432,9 @@ func (r *arrayReader) WriteToRespBody(resp *Response) (n int, err error) {
 	)
 	success := js.FuncOf(func(this js.Value, args []js.Value) any {
 		// Wrap the input ArrayBuffer with a Uint8Array
-		uint8arrayWrapper := uint8Array.New(args[0])
-		respBodyLen := uint8arrayWrapper.Get("byteLength").Int()
+		uint8arrayWrapper, _ := uint8Array.New(args[0])
+		byteLengthObj, _ := uint8arrayWrapper.Get("byteLength")
+		respBodyLen, _ := byteLengthObj.Int()
 
 		if respBodyLen > len(resp.body.B) {
 			newBuf := make([]byte, respBodyLen)
@@ -433,7 +442,7 @@ func (r *arrayReader) WriteToRespBody(resp *Response) (n int, err error) {
 		} else {
 			resp.body.B = resp.body.B[:respBodyLen]
 		}
-		js.CopyBytesToGo(resp.body.B, uint8arrayWrapper)
+		safejs.CopyBytesToGo(resp.body.B, uint8arrayWrapper)
 		bCh <- respBodyLen
 		return nil
 	})
